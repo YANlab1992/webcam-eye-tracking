@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>心理学眼动追踪实验系统 - 6大几何范式与多维评估版</title>
+    <meta name="description" content="基于 WebGazer.js 的本地摄像头眼动研究演示系统，包含九点校准、五点独立验证、数据质量控制与六类几何追踪任务。">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 顶部状态栏 -->
+    <header class="app-header">
+        <div class="brand">
+            <span class="logo-icon">👁️</span>
+            <span class="brand-title">NeuroGaze Lab</span>
+            <span class="version-tag">6大范式·全维评估版</span>
+        </div>
+
+        <div class="system-status">
+            <!-- 实时人眼锁定状态 -->
+            <div class="status-badge" id="gaze-lock-badge">
+                <span class="dot red" id="eye-lock-dot"></span>
+                <span id="eye-lock-text">人眼未检测</span>
+            </div>
+            
+            <!-- 视线坐标与方向监测 -->
+            <div class="status-badge" id="gaze-coords-badge">
+                坐标: <span id="gaze-coords-text">(--, --)</span>
+                <span id="gaze-dir-badge" class="dir-tag">居中</span>
+            </div>
+
+            <div class="status-badge" id="gaze-fps-badge">
+                <span class="fps-val" id="fps-display">0</span> FPS
+            </div>
+
+            <div class="status-badge" id="gaze-correction-badge" title="中心注视对齐偏置值">
+                基准偏置: <span id="gaze-correction-text">X 0 / Y 0 px</span>
+            </div>
+
+            <!-- 灵敏度增益调节 -->
+            <div class="gain-control-group">
+                <label for="gain-slider" class="gain-label">⚡ 视线灵敏度：</label>
+                <input type="range" id="gain-slider" min="1.0" max="5.0" step="0.1" value="2.8" class="slider" title="调节眼动全向灵敏度，提升眼球运动对光标的驱动幅度">
+                <span id="gain-val" class="slider-val">2.8x</span>
+            </div>
+
+            <!-- 独立水平左右范围增益 -->
+            <div class="gain-control-group">
+                <label for="gain-x-slider" class="gain-label">↔️ 水平范围：</label>
+                <input type="range" id="gain-x-slider" min="1.0" max="4.0" step="0.1" value="2.2" class="slider" title="调节水平开合范围，向左向右看无需费力即可轻松到达屏幕两端边界">
+                <span id="gain-x-val" class="slider-val">2.2x</span>
+            </div>
+
+            <!-- 独立垂直上下增益增强 -->
+            <div class="gain-control-group">
+                <label for="gain-y-slider" class="gain-label">↕️ 垂直增强：</label>
+                <input type="range" id="gain-y-slider" min="0.8" max="3.0" step="0.1" value="1.4" class="slider" title="调节垂直上下灵敏度，向上看无需抬头即可轻松到达顶部">
+                <span id="gain-y-val" class="slider-val">1.4x</span>
+            </div>
+
+            <!-- 滤波降噪平滑度 -->
+            <div class="gain-control-group">
+                <label for="smooth-slider" class="gain-label">🛡️ 滤波降噪：</label>
+                <input type="range" id="smooth-slider" min="1" max="5" step="1" value="3" class="slider" title="调节自适应防抖平滑度：1=极速跟随, 3=推荐平衡, 5=超强稳态消抖点">
+                <span id="smooth-val" class="slider-val">平衡(推荐)</span>
+            </div>
+
+            <!-- 控制模式选择 -->
+            <div class="mode-switch-container">
+                <select id="control-mode-select" class="custom-select" title="研究评估模式使用恒速、与视线无关的目标运动">
+                    <option value="research" selected>研究评估 (恒速目标)</option>
+                    <option value="guidance">互动练习 (目光引球)</option>
+                    <option value="direct">直接注视映射 (眼随心动)</option>
+                </select>
+            </div>
+
+            <!-- 核心快捷键：看屏幕中心重置 -->
+            <button id="btn-recenter-zero" class="mini-hud-btn highlight" title="注视中心靶心，按空格键或点击此按钮，瞬间锁定基准">
+                🎯 看中心对齐 (空格键)
+            </button>
+            <button id="btn-toggle-cam-top" class="mini-hud-btn" title="显示或隐藏右上角面部监控视窗">
+                📷 隐藏监控
+            </button>
+            <button id="btn-clear-drift" class="mini-hud-btn" title="清空当前标定模型并重新对齐">
+                🧹 清除校准
+            </button>
+        </div>
+    </header>
+
+    <!-- 主容器 -->
+    <main class="main-container">
+        <!-- 阶段 1: 实验说明与任务总览界面 -->
+        <section id="stage-intro" class="stage-view active">
+            <div class="glass-card intro-card">
+                <h1 class="main-heading">心理学眼动追踪实验系统</h1>
+                <p class="sub-heading">6大经典眼动几何追踪范式 · 空间轨迹相似度与时间动力学全量分析</p>
+                
+                <div class="tasks-overview-grid">
+                    <div class="task-card-mini">
+                        <span class="t-icon">↔️</span>
+                        <h4>1. 从左到右</h4>
+                        <p>水平平滑眼动追随 (Horizontal Pursuit)</p>
+                    </div>
+                    <div class="task-card-mini">
+                        <span class="t-icon">↕️</span>
+                        <h4>2. 从上到下</h4>
+                        <p>垂直平滑眼动追随 (Vertical Pursuit)</p>
+                    </div>
+                    <div class="task-card-mini">
+                        <span class="t-icon">⭕</span>
+                        <h4>3. 画圆</h4>
+                        <p>连续非线性曲率平滑追随 (Circular Tracing)</p>
+                    </div>
+                    <div class="task-card-mini">
+                        <span class="t-icon">⏹️</span>
+                        <h4>4. 画方</h4>
+                        <p>90° 方向转换与目标再捕获 (Square Pursuit)</p>
+                    </div>
+                    <div class="task-card-mini">
+                        <span class="t-icon">⭐</span>
+                        <h4>5. 画五角星</h4>
+                        <p>复杂折线路径追随与目标再捕获 (5-Point Star)</p>
+                    </div>
+                    <div class="task-card-mini">
+                        <span class="t-icon">♾️</span>
+                        <h4>6. 画不规则图形</h4>
+                        <p>心理学复合变频连续曲线 (Complex Spline)</p>
+                    </div>
+                </div>
+
+                <div class="guide-grid">
+                    <div class="guide-item">
+                        <div class="guide-icon">🎯</div>
+                        <h3>一键看中心对齐 (空格键)</h3>
+                        <p>若出现整体漂移，<strong>请看着屏幕中心按【空格键】</strong>进行中心漂移校正；正式测试前仍应完成九点校准与独立验证。</p>
+                    </div>
+                    <div class="guide-item">
+                        <div class="guide-icon">✨</div>
+                        <h3>全向实时双流轨迹</h3>
+                        <p>荧光虚线显示标准目标几何轨迹，青蓝色动态霓虹光流实时记录您的真实眼动路径。</p>
+                    </div>
+                    <div class="guide-item">
+                        <div class="guide-icon">📊</div>
+                        <h3>轨迹与时间多维评估</h3>
+                        <p>实验结束输出同步目标误差、有效采样率、覆盖率与估计追随延迟；结果用于研究演示，不作临床诊断。</p>
+                    </div>
+                </div>
+
+                <!-- 诊断状态提示 -->
+                <div class="diagnostic-banner" id="diagnostic-banner">
+                    <span class="diag-icon">💡</span>
+                    <span id="diag-msg">已就绪：WebGazer 回归预测、稳健滤波与独立验证流程待启动。</span>
+                </div>
+
+                <div class="action-box">
+                    <div class="main-buttons-row">
+                        <button id="btn-quick-play" class="primary-btn glow-btn">
+                            🚀 快速体验（跳过正式校准）
+                        </button>
+                        <button id="btn-start-init" class="secondary-btn">
+                            🎯 9 点校准 + 独立验证（推荐）
+                        </button>
+                    </div>
+                    <div class="alt-actions">
+                        <button id="btn-use-simulated" class="text-link-btn">
+                            🖱️ 使用【鼠标模拟视线模式】快速体验
+                        </button>
+                    </div>
+                    <p class="privacy-note">🔒 纯本地运行：眼动与图像均在浏览器内处理。摄像头方案受光照、眼镜、头动和屏幕参数影响，不等同于实验室级眼动仪。</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 阶段 2: 9 点精密标定界面 -->
+        <section id="stage-calibration" class="stage-view">
+            <div class="calibration-overlay">
+                <div class="calib-instruction">
+                    <h2>9 点眼动多维标定</h2>
+                    <p>按高亮顺序操作：注视红点约 0.6 秒后<strong>单击一次并继续保持注视</strong>，系统自动采集 8 帧。标定中请勿按空格键。</p>
+                    <div class="calib-progress-bar">
+                        <div class="calib-progress-fill" id="calib-progress-fill"></div>
+                    </div>
+                    <div class="calib-stats">
+                        <span class="calib-count" id="calib-count-text">完成度: 0 / 9 个标定点</span>
+                        <span class="calib-samples" id="calib-samples-text">已采集样本: 0 组</span>
+                    </div>
+                    <div class="calib-actions-row">
+                        <button id="btn-skip-calib-direct" class="mini-action-btn">直接完成并前往实验舞台 →</button>
+                    </div>
+                </div>
+
+                <!-- 9个标定点分布在屏幕四周与中心 -->
+                <div class="calib-point" id="pt1" data-id="1" style="top: 12%; left: 10%;"><span>1</span></div>
+                <div class="calib-point" id="pt2" data-id="2" style="top: 12%; left: 50%;"><span>1</span></div>
+                <div class="calib-point" id="pt3" data-id="3" style="top: 12%; left: 90%;"><span>1</span></div>
+                <div class="calib-point" id="pt4" data-id="4" style="top: 50%; left: 10%;"><span>1</span></div>
+                <div class="calib-point" id="pt5" data-id="5" style="top: 50%; left: 50%;"><span>1</span></div>
+                <div class="calib-point" id="pt6" data-id="6" style="top: 50%; left: 90%;"><span>1</span></div>
+                <div class="calib-point" id="pt7" data-id="7" style="top: 88%; left: 10%;"><span>1</span></div>
+                <div class="calib-point" id="pt8" data-id="8" style="top: 88%; left: 50%;"><span>1</span></div>
+                <div class="calib-point" id="pt9" data-id="9" style="top: 88%; left: 90%;"><span>1</span></div>
+            </div>
+        </section>
+
+        <!-- 阶段 3: 精度验证界面 (Catch Trial) -->
+        <section id="stage-validation" class="stage-view">
+            <div class="glass-card validation-card">
+                <h2>校准精度自测 (Accuracy Validation)</h2>
+                <p>系统将在 5 个未参与校准的位置依次呈现目标。请只移动眼睛，持续注视每个目标；首段稳定时间不计入结果。</p>
+                <div class="measurement-settings" aria-label="测量参数">
+                    <label>视距 <input id="view-distance-cm" type="number" min="30" max="120" step="1" value="60"> cm</label>
+                    <label>屏幕对角线 <input id="screen-diagonal-in" type="number" min="8" max="60" step="0.1" value="15.6"> 英寸</label>
+                </div>
+                <div class="accuracy-meter-box">
+                    <div class="meter-circle" id="val-meter-circle">
+                        <span class="meter-val" id="validation-deg-val">--</span>
+                        <span class="meter-unit">视角误差 (deg)</span>
+                    </div>
+                    <div class="meter-assessment" id="validation-assessment">准备就绪，点击开始自测</div>
+                    <div class="validation-metrics" id="validation-metrics">
+                        <span>中位准确度 <strong id="validation-median">--</strong></span>
+                        <span>精密度 RMS-S2S <strong id="validation-precision">--</strong></span>
+                        <span>有效采样率 <strong id="validation-valid-rate">--</strong></span>
+                    </div>
+                </div>
+                <div class="val-actions">
+                    <button id="btn-start-validation" class="primary-btn">开始 5 点独立验证（约 10 秒）</button>
+                    <button id="btn-skip-to-exp" class="primary-btn glow-btn" style="display:none;">进入6大几何实验 →</button>
+                    <button id="btn-recalib-now" class="secondary-btn">重新校准 9 点</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 阶段 4: 6大几何眼动实验舞台 (核心多维交互) -->
+        <section id="stage-experiment" class="stage-view">
+            <div class="experiment-dashboard">
+                <!-- 6大任务切换导航条 -->
+                <div class="tasks-nav-bar" id="tasks-nav-bar">
+                    <button class="task-tab-btn active" data-task="lr" id="tab-task-lr">
+                        <span class="tab-icon">↔️</span> 从左到右
+                    </button>
+                    <button class="task-tab-btn" data-task="tb" id="tab-task-tb">
+                        <span class="tab-icon">↕️</span> 从上到下
+                    </button>
+                    <button class="task-tab-btn" data-task="circle" id="tab-task-circle">
+                        <span class="tab-icon">⭕</span> 画圆
+                    </button>
+                    <button class="task-tab-btn" data-task="square" id="tab-task-square">
+                        <span class="tab-icon">⏹️</span> 画方
+                    </button>
+                    <button class="task-tab-btn" data-task="star" id="tab-task-star">
+                        <span class="tab-icon">⭐</span> 画五角星
+                    </button>
+                    <button class="task-tab-btn" data-task="irregular" id="tab-task-irregular">
+                        <span class="tab-icon">♾️</span> 画不规则图形
+                    </button>
+                </div>
+
+                <!-- 实验实时指标控制 HUD -->
+                <div class="exp-hud">
+                    <div class="hud-item">
+                        <span class="hud-label">当前任务</span>
+                        <span class="hud-val highlight" id="hud-task-name">1. 从左到右</span>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-label">路径进度</span>
+                        <div class="hud-progress-wrap">
+                            <div class="hud-progress-bar" id="hud-task-progress-bar"></div>
+                            <span class="hud-val" id="hud-progress-text">0%</span>
+                        </div>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-label">本轮耗时</span>
+                        <span class="hud-val" id="hud-timer">0.00 s</span>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-label">实时同步误差</span>
+                        <span class="hud-val green" id="hud-live-score">--°</span>
+                    </div>
+                    <div class="hud-controls">
+                        <button id="btn-toggle-dot" class="hud-btn" title="显示或隐藏视线红点">🔴 视线红点</button>
+                        <button id="btn-reset-task" class="hud-btn" title="复位并重新开始当前图形">🔄 重绘此图</button>
+                        <button id="btn-next-task" class="hud-btn" title="跳至下一项图形">⏭️ 下一任务</button>
+                        <button id="btn-finish-all-tasks" class="hud-btn highlight" title="结算并查看6任务综合报告">📊 导出总报告</button>
+                    </div>
+                </div>
+
+                <!-- 多维几何实验舞台 (支持线、圆、方、五角星与不规则复杂图形) -->
+                <div class="multi-shape-arena" id="multi-shape-arena">
+                    <!-- 底层：标准几何模板 Canvas -->
+                    <canvas id="target-canvas" class="arena-canvas"></canvas>
+
+                    <!-- 中层：用户实际视线轨迹记录 Canvas -->
+                    <canvas id="trail-canvas" class="arena-canvas"></canvas>
+
+                    <!-- 动态引力激光束 Canvas -->
+                    <canvas id="traction-canvas" class="arena-canvas"></canvas>
+
+                    <!-- 动态目标引导球 (Target Guide Ball) -->
+                    <div class="target-guide-ball" id="gaze-ball">
+                        <div class="ball-glow"></div>
+                        <div class="ball-core"></div>
+                    </div>
+
+                    <!-- 单任务成功结算横幅 -->
+                    <div class="task-success-banner" id="task-success-banner">
+                        <div class="task-success-content">
+                            <span class="trophy-icon">🏆</span>
+                            <h3 id="task-success-title">任务完成！</h3>
+                            <div class="task-metric-chips">
+                                <div class="chip">耗时: <strong id="task-res-time">0.00s</strong></div>
+                                <div class="chip">追踪质量指数: <strong id="task-res-score">0分</strong></div>
+                                <div class="chip">同步目标 RMSE: <strong id="task-res-rmse">0px</strong></div>
+                            </div>
+                            <div class="task-success-actions">
+                                <button id="btn-proceed-next" class="primary-btn glow-btn">进入下一任务 →</button>
+                                <button id="btn-replay-task" class="secondary-btn">重新练习此图</button>
+                                <button id="btn-view-summary" class="text-link-btn">查看最终总报告 📊</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 实时操作指南条 -->
+                <div class="experiment-tips" id="exp-tips-text">
+                    👀 <strong>研究评估模式</strong>：只注视匀速移动的目标球，不要追看红色视线点；目标运动不受视线控制。
+                </div>
+            </div>
+        </section>
+
+        <!-- 阶段 5: 6大几何范式全维度评估看板与科研数据导出 -->
+        <section id="stage-results" class="stage-view">
+            <div class="glass-card results-card">
+                <h2>实验完成！6类几何追踪任务评估报告</h2>
+                <p class="sub-desc">已采集水平、垂直、圆形、矩形、五角星与复杂曲线的同步目标—注视数据。质量指数不是临床常模分数。</p>
+
+                <!-- 顶级宏观指标汇总 -->
+                <div class="metrics-summary-grid">
+                    <div class="metric-box">
+                        <span class="metric-num" id="res-overall-score">-- 分</span>
+                        <span class="metric-name">综合追踪质量指数（非临床常模）</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-num" id="res-total-time">0.00s</span>
+                        <span class="metric-name">实验总耗时 (全部完成任务)</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-num" id="res-avg-deg-error">--°</span>
+                        <span class="metric-name">空间平均视角误差 (deg)</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-num" id="res-total-samples">0</span>
+                        <span class="metric-name">总眼动时序采样点 (Frames)</span>
+                    </div>
+                </div>
+                <div class="session-quality-note" id="session-quality-note">
+                    未完成独立验证：本报告仅作交互演示，误差指标需谨慎解释。
+                </div>
+
+                <!-- 6任务轨迹拟合对比卡片矩阵 -->
+                <div class="task-results-section">
+                    <div class="section-header">
+                        <h3>各几何任务轨迹拟合对比 (标准模板 vs 实际视线)</h3>
+                        <div class="legend">
+                            <span class="legend-item"><span class="legend-dot green"></span>标准几何路径</span>
+                            <span class="legend-item"><span class="legend-dot cyan"></span>实际注视轨迹</span>
+                        </div>
+                    </div>
+                    
+                    <div class="task-cards-grid" id="task-cards-grid">
+                        <!-- 由 app.js 动态渲染 6 个任务的缩略 Canvas 与详尽指标 -->
+                    </div>
+                </div>
+
+                <!-- 心理学眼动能力多维分析表 -->
+                <div class="psychology-analysis-section">
+                    <h3>眼动任务与数据质量指标分解 (Oculomotor Task Metrics)</h3>
+                    <div class="analysis-table-wrap">
+                        <table class="analysis-table">
+                            <thead>
+                                <tr>
+                                    <th>实验范式</th>
+                                    <th>主要心理学机制</th>
+                                    <th>完成耗时</th>
+                                    <th>同步目标误差</th>
+                                    <th>追踪质量指数</th>
+                                    <th>数据质量</th>
+                                </tr>
+                            </thead>
+                            <tbody id="analysis-table-body">
+                                <!-- 动态注入 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 导出按钮区 -->
+                <div class="export-actions">
+                    <button id="btn-export-csv" class="primary-btn glow-btn">
+                        📥 导出标准科研原始数据 (.CSV)
+                    </button>
+                    <button id="btn-export-json" class="secondary-btn">
+                        💾 导出完整时序多维对象 (.JSON)
+                    </button>
+                    <button id="btn-restart-all" class="secondary-btn">
+                        🔁 重新进行完整实验
+                    </button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 全局高精度视线光标 Reticle (独立于容器，无偏移) -->
+    <div class="live-gaze-cursor" id="live-gaze-cursor">
+        <div class="reticle"></div>
+    </div>
+
+    <!-- 右上角无畸变监控视窗 (支持一键折叠隐藏，避免遮挡九点校准标定点) -->
+    <div class="camera-monitor-widget" id="cam-monitor-widget">
+        <div class="monitor-header">
+            <span class="monitor-title">AI 面部与人眼定位监控</span>
+            <div class="monitor-header-right">
+                <span class="monitor-status" id="monitor-box-status">检测中...</span>
+                <button id="btn-toggle-cam-monitor" class="monitor-btn-toggle" title="隐藏监控视窗（避免遮挡右上角九点校准标定点）">
+                    ✕ 隐藏
+                </button>
+            </div>
+        </div>
+        <div class="monitor-body" id="webgazer-container-wrapper">
+            <div class="center-crosshair"></div>
+        </div>
+        <div class="monitor-coach" id="monitor-coach-tip">
+            💡 看着屏幕中心轻按【空格键】即可瞬间对齐中心
+        </div>
+    </div>
+
+    <!-- 隐藏后呈现的极简常驻悬浮唤出胶囊按钮 (位于右上角微缩区域，绝不遮挡任何标定点) -->
+    <button id="btn-reopen-cam-monitor" class="cam-monitor-floating-pill" style="display:none;" title="重新展开右上角AI面部与人眼监控视窗">
+        📷 展开面部监控
+    </button>
+
+    <!-- 本地完整离线库 -->
+    <script src="webgazer.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
